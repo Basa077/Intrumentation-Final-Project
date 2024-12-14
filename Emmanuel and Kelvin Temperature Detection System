@@ -1,0 +1,131 @@
+#include <Wire.h>
+#include <LiquidCrystal_I2C.h>
+
+// Initialize the LCD (use the correct I2C address for your LCD)
+LiquidCrystal_I2C lcd(0x27, 16, 2); // 16x2 LCD with I2C
+
+// Define pins for analog inputs
+const int out1Pin = A2;  // Output 1 from comparator
+const int out2Pin = A3;  // Output 2 from comparator
+
+// Define pins for motor control via L293D
+const int motorPin1 = 2;  // Input 1 on L293D
+const int motorPin2 = 3;  // Input 2 on L293D
+const int enablePin = 5;  // Enable pin for motor speed control (PWM pin)
+
+// Motor speed control (PWM values)
+int fullSpeed = 255;  // Full speed (100% duty cycle)
+int halfSpeed = 128;  // Half speed (50% duty cycle)
+
+// Timing variables
+unsigned long previousMillis = 0;  // Stores the last time the motor speed was updated
+const long interval = 10000;       // Interval for switching speed (10 seconds)
+bool isFullSpeed = true;           // Flag to track if the motor is running at full speed
+
+void setup() {
+  pinMode(motorPin1, OUTPUT);  // Motor control pin 1
+  pinMode(motorPin2, OUTPUT);  // Motor control pin 2
+  pinMode(enablePin, OUTPUT);  // Enable pin for PWM control
+
+  lcd.init();                  // Initialize the LCD
+  lcd.backlight();             // Turn on the backlight
+  lcd.setCursor(0, 0);         // Set cursor to the first line
+  lcd.print("System Ready");   // Initial message
+  delay(2000);                 // Wait for 2 seconds
+  lcd.clear();                 // Clear the screen
+}
+
+void loop() {
+  // Read the analog values from the comparator outputs
+  int out1Value = analogRead(out1Pin);
+  int out2Value = analogRead(out2Pin);
+
+  // Define thresholds for HIGH (4-5V) and LOW (0-1V)
+  bool out1High = out1Value > 700; // Out1 is HIGH if value > ~4V
+  bool out2High = out2Value > 700; // Out2 is HIGH if value > ~4V
+
+  // Display messages on the LCD based on the output values
+  lcd.clear(); // Clear the LCD before displaying new messages
+
+  if (out1High && out2High) { // "Within Window"
+    lcd.setCursor(0, 0);
+    lcd.print("Within Window");
+    lcd.setCursor(0, 1);
+    lcd.print("Motor OFF");
+    stopMotor();
+  } 
+  else if (out1High && !out2High) { // "Above Window"
+    lcd.setCursor(0, 0);
+    lcd.print("Above Window");
+    runMotorWithRPM();
+  } 
+  else if (!out1High && out2High) { // "Below Window"
+    lcd.setCursor(0, 0);
+    lcd.print("Below Window");
+    lcd.setCursor(0, 1);
+    lcd.print("Motor OFF");
+    stopMotor();
+  } 
+  else { // Error condition
+    lcd.setCursor(0, 0);
+    lcd.print("Error");
+    lcd.setCursor(0, 1);
+    lcd.print("Motor OFF");
+    stopMotor();
+  }
+
+  delay(100); // Wait for 0.1 second before checking again
+}
+
+// Function to stop the motor
+void stopMotor() {
+  digitalWrite(motorPin1, LOW);  // Motor off
+  digitalWrite(motorPin2, LOW);  // Motor off
+  analogWrite(enablePin, 0);     // Stop motor
+}
+
+// Function to update motor speed and display RPM on LCD
+void runMotorWithRPM() {
+  digitalWrite(motorPin1, HIGH);  // Motor on (clockwise or forward)
+  digitalWrite(motorPin2, LOW);   // Motor on
+
+  int motorRPM = isFullSpeed ? calculateRPM(fullSpeed) : calculateRPM(halfSpeed);
+  lcd.setCursor(0, 1);
+  lcd.print("RPM: ");
+  lcd.print(motorRPM);
+
+  // Display the motor speed mode (Half or Full)
+  lcd.setCursor(10, 1);
+  if (isFullSpeed) {
+    lcd.print("Full");
+  } else {
+    lcd.print("Half");
+  }
+
+  updateMotorSpeed(); // Update motor speed (full speed or half speed)
+}
+
+// Function to estimate RPM based on PWM value
+int calculateRPM(int pwmValue) {
+  int maxRPM = 3000; // Assume max RPM of 3000 at full speed (PWM = 255)
+  return map(pwmValue, 0, 255, 0, maxRPM);  // Map PWM value to RPM range
+}
+
+// Function to update motor speed based on time intervals
+void updateMotorSpeed() {
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillis >= interval) {
+    // Save the last time we updated the speed
+    previousMillis = currentMillis;
+
+    // Switch between full speed and half speed
+    if (isFullSpeed) {
+      analogWrite(enablePin, halfSpeed);  // Set to half speed
+      isFullSpeed = false;               // Set flag to indicate half speed
+    } else {
+      analogWrite(enablePin, fullSpeed); // Set to full speed
+      isFullSpeed = true;                // Set flag to indicate full speed
+    }
+  }
+}
